@@ -1,16 +1,12 @@
-# Deploy cairn-site to GitHub Pages (project site under /<repo>).
+# Deploy the pre-built static site in ./dist to GitHub Pages.
 #
-# The build pulls all content from cairn-server's public API, so the workflow
-# checks out the cairn-server repo, builds and starts it with a fresh seeded
-# database, waits for health, then builds the static site and deploys it.
+# This repo holds only the built output (dist/), produced locally by:
+#   cd ../cairn-server && go run ./cmd/cairn-server
+#   powershell scripts/build-with-api.ps1 -SiteUrl https://jarodchen.github.io -SiteBase /official-website-sample
+#   # then copy dist/* into this repo and push
+# So the workflow only uploads the artifact and deploys it -- no build step.
 #
-# Setup (once):
-#   1. Create the repository (e.g. <user>/official-website-sample).
-#   2. Settings -> Pages -> Source: "GitHub Actions".
-#   3. Make sure the cairn-server repo is reachable by the default GITHUB_TOKEN
-#      (public repo, or use a PAT stored as a secret if it is private).
-#      If your cairn-server checkout has a different name, edit the
-#      repository: value in the "Check out cairn-server" step below.
+# Setup (once): Settings -> Pages -> Source: "GitHub Actions".
 name: Deploy to GitHub Pages
 
 on:
@@ -28,54 +24,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check out cairn-server (data source)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/cairn-server
-          path: cairn-server
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Build cairn-server
-        working-directory: cairn-server
-        run: go build -o bin/cairn-server ./cmd/cairn-server
-
-      - name: Start cairn-server (seeds placeholder data on first run)
-        working-directory: cairn-server
-        run: |
-          mkdir -p /tmp/cairn
-          CAIRN_ADDR=127.0.0.1:8080 \
-          CAIRN_DB_PATH=/tmp/cairn/cairn.db \
-          CAIRN_MEDIA_DIR=/tmp/cairn/media \
-          ./bin/cairn-server > /tmp/cairn/server.log 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8080/api/health > /dev/null; then
-              echo "cairn-server healthy"
-              exit 0
-            fi
-            sleep 0.5
-          done
-          echo "cairn-server did not become healthy"
-          cat /tmp/cairn/server.log
-          exit 1
-
-      - name: Build site
-        run: |
-          npm ci
-          SITE_URL=https://${{ github.repository_owner }}.github.io \
-          SITE_BASE=/${{ github.event.repository.name }} \
-          npx astro build
 
       - uses: actions/configure-pages@v5
 
@@ -83,12 +38,5 @@ jobs:
         with:
           path: dist
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
